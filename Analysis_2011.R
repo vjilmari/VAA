@@ -1,0 +1,1617 @@
+#' ---
+#' title: "Analysis 2011"
+#' output: 
+#'   pdf_document: 
+#'     keep_tex: yes
+#'     keep_md: yes
+#'     toc: yes
+#'     toc_depth: 5
+#' ---
+#' 
+## ----setup, include=FALSE------------------------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+#' 
+#' \newpage
+#' 
+#' # Preparations
+#' 
+#' Load packages
+#' 
+## ----message=FALSE, warning=FALSE----------------------------------------------------------------------------------
+library(here)
+library(dplyr)
+library(labelled)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(psych)
+library(lavaan)
+library(semTools)
+library(semPlot)
+library(haven)
+library(sjlabelled)
+#library(robumeta)
+
+#' 
+#' Read data file
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+df2011 <- readRDS("data/final/candsurvey_vaa_2011.rds")
+
+#' 
+#' Select variables used in the analysis
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+VAA_LR_items<-c("y22","y23","y26","y27","y9","y19")
+VAA_LR_items %in% names(df2011)
+
+VAA_GT_items<-c("y4","y5","y1","y21")
+VAA_GT_items %in% names(df2011)
+
+CS_LR_items<-c("C1_2","C1_7","C1_8")
+CS_LR_items %in% names(df2011)
+
+CS_GT_items<-c("C1_1","C1_3","C1_4","C1_5","C1_6","C1_10","C1_11")
+CS_GT_items %in% names(df2011)
+
+Party_item<-c("puolue")
+Party_item %in% names(df2011)
+
+#vector for all item names
+
+all_items<-c(Party_item,
+             VAA_LR_items,
+             VAA_GT_items,
+             CS_LR_items,
+             CS_GT_items)
+
+#vector for observed variables in CFA (and party)
+
+obs_items<-c(Party_item,
+             VAA_LR_items,
+             VAA_GT_items,
+             CS_LR_items,
+             CS_GT_items)
+
+
+#' 
+#' Print the responses to the observed items
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+for (i in 1:length(obs_items)){
+  print(obs_items[i])
+  print(table(df2011[,obs_items[i]],useNA="always"))
+  }
+
+#' 
+#' Recode middle-responses (3) from yle items to NA, and 99 responses from CS to NA
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+VAA_items<-c(VAA_LR_items,VAA_GT_items)
+CS_items<-c(CS_LR_items,CS_GT_items)
+
+three.to.na<-function(var){
+  return(ifelse(var==3,NA,var))
+}
+
+df2011[,VAA_items]<-sapply(df2011[,VAA_items],three.to.na)
+
+ninenine.to.na<-function(var){
+  return(ifelse(var==99,NA,var))
+}
+
+df2011[,CS_items]<-sapply(df2011[,CS_items],ninenine.to.na)
+
+
+
+for (i in 1:length(all_items)){
+  print(all_items[i])
+  print(table(df2011[,all_items[i]],useNA="always"))
+  }
+
+#' 
+#' Exclude completely missing cases
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+df2011$completely_missing<-
+  rowSums(is.na(df2011[,obs_items[2:length(obs_items)]]))==length(obs_items)-1
+
+table(df2011$completely_missing)
+
+dat2011<-df2011 %>%
+  filter(!completely_missing)
+
+
+#' 
+#' Transform/Reverse code high scores on observed variable to indicate right and TAN positioning
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+reverse_items<-c("y26","y19",
+                 "y4","y1","y21",
+                 "C1_7","C1_8",
+                 "C1_3","C1_5","C1_10","C1_11")
+
+reverse_items %in% names(df2011)
+
+for (i in 1:length(reverse_items)){
+  dat2011[,reverse_items[i]]<-6-dat2011[,reverse_items[i]]
+}
+
+
+
+#' 
+#' \newpage
+#' 
+#' # Analysis
+#' 
+#' ## H1 and H2
+#' 
+#' H1. Left-Right placement as computed from responses to the pre-election public Voting Advice Applications (VAAs) is positively associated with Left-Right placement as computed from responses to the privately administered post-election Candidate Survey (CS). This association is stronger than any associations between the Left-Right and GAL-TAN dimensions.
+#' 
+#' H2. GAL-TAN placement as computed from responses to the pre-election public Voting Advice Applications (VAAs) is positively associated with GAL-TAN placement as computed from responses to the privately administered post-election Candidate Survey (CS). This association is stronger than any associations between the Left-Right and GAL-TAN dimensions.
+#' 
+#' ### Define the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+model_H1H2<-"
+#loadings
+VAA_LR=~y22+y23+y26+y27+y9+y19
+VAA_GT=~y4+y5+y1+y21
+CS_LR=~C1_2+C1_7+C1_8
+CS_GT=~C1_1+C1_3+C1_4+C1_5+C1_6+C1_10+C1_11
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+"
+
+
+#' 
+#' ### Fit the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2<-cfa(model=model_H1H2,
+              data=dat2011,
+              missing="fiml")
+
+
+#' 
+#' Some problems with latent variable covariance structure
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+lavInspect(fit_H1H2, "cov.lv")
+#examine standardized estimates
+std.est_H1H2<-standardizedsolution(fit_H1H2)
+std.est_H1H2[std.est_H1H2$op=="~~" & 
+               std.est_H1H2$lhs!=std.est_H1H2$rhs,]
+
+
+
+
+#' 
+#' There is an impossible correlation between GAL-TAN factors (absolute value > 1)
+#' 
+#' \newpage
+#' 
+#' #### Respecify the model by introducing the preregistered residual correlation
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+model_H1H2.re<-paste0(model_H1H2,
+                      "y4~~C1_4\n")
+
+#' 
+#' #### Fit the respecified model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.re<-cfa(model=model_H1H2.re,
+              data=dat2011,
+              missing="fiml")
+
+
+#' 
+#' The problem persists, inspect the parameter estimates
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+summary(fit_H1H2.re,fit=T,standardized=T,rsquare=T)
+
+#' 
+#' Inspect fit of the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' The fits of the models are poor.
+#' 
+#' Hypotheses 1 and 2
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H1H2<-standardizedsolution(fit_H1H2.re)
+std.est_H1H2[std.est_H1H2$op==":=" | 
+               std.est_H1H2$op=="~~" & 
+               std.est_H1H2$lhs!=std.est_H1H2$rhs,]
+
+#' 
+#' \newpage
+#' 
+#' #### Exploratory analysis for H1 and H2: Seek misspecification to improve the overall model fit
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis_H1H2<-miPowerFit(fit_H1H2.re,stdLoad=.40,cor=.20)
+mis_H1H2<-mis_H1H2[mis_H1H2$op=="=~" | mis_H1H2$op=="~~",]
+#see summary of the decisions
+table(mis_H1H2$decision.pow)
+#there are 9 misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis_H1H2[,rounded.vars]<-sapply(mis_H1H2[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis_H1H2 %>%
+  filter(mis_H1H2$decision.pow=="M" | 
+                mis_H1H2$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+
+
+#' 
+#' 
+#' Item y1 "Finland should continue to financially assist EU countries that are facing economic hardship (r.)" is proposed to load to all other factors besides loading on its specified factor (VAA_GT). It is also proposed to have residual correlation with C1_10 ("Maahanmuutto on hyvä asia Suomen taloudelle"). Exclude item y1 entirely
+#' 
+#' ##### Exploratory respecification
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+model_H1H2.exp.re<-"
+#loadings
+VAA_LR=~y22+y23+y26+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_2+C1_7+C1_8
+CS_GT=~C1_1+C1_3+C1_4+C1_5+C1_6+C1_10+C1_11
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+
+y4~~C1_4
+"
+
+
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.exp.re<-cfa(model=model_H1H2.exp.re,
+              data=dat2011,
+              missing="fiml")
+
+#' 
+#' Problems are still there
+#' 
+#' Inspect fit of the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.exp.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' The fit of the model is improved by removal of one item (these are not really comparable, because of non-nested modeling).
+#' 
+#' Retest Hypotheses 1 and 2
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H1H2.exp<-standardizedsolution(fit_H1H2.exp.re)
+std.est_H1H2.exp[std.est_H1H2.exp$op==":=" | 
+               std.est_H1H2.exp$op=="~~" & 
+               std.est_H1H2.exp$lhs!=std.est_H1H2.exp$rhs,]
+
+#' 
+#' 
+#' \newpage
+#' 
+#' #### Seek for additional misspecifications
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis.H1H2<-miPowerFit(fit_H1H2.exp.re,stdLoad=.40,cor=.20)
+mis.H1H2<-mis.H1H2[mis.H1H2$op=="=~" | 
+                     (mis.H1H2$op=="~~" &
+                        mis.H1H2$lhs!=mis.H1H2$rhs),]
+#see summary of the decisions
+table(mis.H1H2$decision.pow)
+#there are several misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis.H1H2[,rounded.vars]<-sapply(mis.H1H2[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis.H1H2 %>%
+  filter(mis.H1H2$decision.pow=="M" | 
+                mis.H1H2$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+  
+
+#' 
+#' item y26 is indicated to cross-lead quite strongly, it is removed as well.
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+model_H1H2.exp.re.2<-"
+#loadings
+VAA_LR=~y22+y23+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_2+C1_7+C1_8
+CS_GT=~C1_1+C1_3+C1_4+C1_5+C1_6+C1_10+C1_11
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+
+y4~~C1_4
+"
+
+
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.exp.re.2<-cfa(model=model_H1H2.exp.re.2,
+              data=dat2011,
+              missing="fiml")
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2.exp.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.exp.re.2,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Repeat the misspecification identification again
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis.H1H2<-miPowerFit(fit_H1H2.exp.re.2,stdLoad=.40,cor=.20)
+mis.H1H2<-mis.H1H2[mis.H1H2$op=="=~" | 
+                     (mis.H1H2$op=="~~" &
+                        mis.H1H2$lhs!=mis.H1H2$rhs),]
+#see summary of the decisions
+table(mis.H1H2$decision.pow)
+#there are several misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis.H1H2[,rounded.vars]<-sapply(mis.H1H2[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis.H1H2 %>%
+  filter(mis.H1H2$decision.pow=="M" | 
+                mis.H1H2$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+  
+
+#' 
+#' cross-loading and residual correlations are suggested for C1_10 (Maahanmuutto on hyvä asia Suomen taloudelle). Add the residual correlation with y5 (Tax funds should not be used in the current extent for taking in immigrants)
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+model_H1H2.exp.re.3<-"
+#loadings
+VAA_LR=~y22+y23+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_2+C1_7+C1_8
+CS_GT=~C1_1+C1_3+C1_4+C1_5+C1_6+C1_10+C1_11
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+
+y4~~C1_4
+y5~~C1_10	
+
+"
+
+
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.exp.re.3<-cfa(model=model_H1H2.exp.re.3,
+              data=dat2011,
+              missing="fiml")
+
+#' 
+#' Problem still persists
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2.exp.re.2,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.exp.re.3,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' 
+#' Repeat the misspecification identification again
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis.H1H2<-miPowerFit(fit_H1H2.exp.re.3,stdLoad=.40,cor=.20)
+mis.H1H2<-mis.H1H2[mis.H1H2$op=="=~" | 
+                     (mis.H1H2$op=="~~" &
+                        mis.H1H2$lhs!=mis.H1H2$rhs),]
+#see summary of the decisions
+table(mis.H1H2$decision.pow)
+#there are several misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis.H1H2[,rounded.vars]<-sapply(mis.H1H2[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis.H1H2 %>%
+  filter(mis.H1H2$decision.pow=="M" | 
+                mis.H1H2$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+
+summary(fit_H1H2.exp.re.3,fit=T,standardized=T)
+
+#' 
+#' 
+#' 
+#' Remove the weak loading items C1_2 and C1_5
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+model_H1H2.exp.re.4<-"
+#loadings
+VAA_LR=~y22+y23+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_7+C1_8
+CS_GT=~C1_1+C1_3+C1_4+C1_6+C1_10+C1_11
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+
+y4~~C1_4
+y5~~C1_10	
+
+"
+
+
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.exp.re.4<-cfa(model=model_H1H2.exp.re.4,
+              data=dat2011,
+              missing="fiml")
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+
+round(inspect(fit_H1H2.exp.re.3,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.exp.re.4,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+std.est.H1H2.exp.re.4<-standardizedsolution(fit_H1H2.exp.re.4)
+
+std.est.H1H2.exp.re.4[std.est.H1H2.exp.re.4$op == "=~" |
+                        (std.est.H1H2.exp.re.4$op == "~~" &
+                           std.est.H1H2.exp.re.4$lhs != std.est.H1H2.exp.re.4$rhs),]
+
+#' 
+#' ### Exploratory factor analysis for CS-data
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+all_CS_items<-c("C1_2","C1_7","C1_8","C1_1","C1_3","C1_4","C1_5","C1_6","C1_10","C1_11")
+
+#conduct a parallel analysis to explore the number of factors
+fa.parallel(dat2011[,all_CS_items])
+#four factor solution
+fa(dat2011[,all_CS_items],nfactors = 4,fm = "ml",rotate = "oblimin")
+
+
+
+#' 
+#' First factor is defined by "Samaa sukupuolta olevien avioliitot pitäisi kieltää laissa" to which only other substantial loading is from "Naisilla pitäisi olla vapaus päättää aborttikysymyksistä". So this represents so conservative dimension. 
+#' 
+#' Second factor (ML3) has loadings from immigration items.
+#' 
+#' Third factor is defined by "Tuloja ja vaurautta pitäisi uudelleenjakaa tavallisten ihmisten suuntaan" with no substantial loadings from other items.
+#' 
+#' Some of the items also have very weak variance explained, and high communalities
+#' 
+#' Fourth factor is some sort of mixed factor. This is not an ideal solution to which VAA responses in GT and LR could be compared to.
+#' 
+#' Try 3 factor solution.
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fa(dat2011[,all_CS_items],nfactors = 3,fm = "ml",rotate = "oblimin")
+
+#' 
+#' First factor (ML3) has loadings from immigration items. 
+#' 
+#' Second (ML1) is a conservativeness factor  (factors 1 and 2 also correlate with .50)
+#' 
+#' Third factor is right-wing factor, although environment and some women's right items seem to weakly load there as well. 
+#' 
+#' See what the two-factor solution looks like
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fa(dat2011[,all_CS_items],nfactors = 2,fm = "ml",rotate = "oblimin")
+
+#' 
+#' This, at least partially, reflects the intended structure. Some loadings, however, are very weak (<.40), and some items show also larger (but < .40) cross-loadings than intended loadings.
+#' 
+#' Such items are:
+#' C1_2: Politiikan ei pitäisi puuttua talouden toimintaan
+#' C1_3: Luonnon suojelemiseksi pitäisi ryhtyä vahvempiin toimenpiteisiin
+#' C1_5: Naisia pitäisi suosia työhönotossa ja ylennyksissä
+#' C1_11: Naisilla pitäisi olla vapaus päättää aborttikysymyksistä
+#' 
+#' Exclude these items and see if the solution produces a better criteria to which VAA responses can be compared
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+subset_CS_items<-c("C1_7","C1_8","C1_1","C1_4","C1_6","C1_10")
+
+fa(dat2011[,subset_CS_items],nfactors = 2,fm = "ml",rotate = "oblimin")
+
+
+#' 
+#' It's better, although, the CS-LR dimension seems to be very strongly defined by a single item C1_8: Tuloja ja vaurautta pitäisi uudelleenjakaa tavallisten ihmisten suuntaan
+#' 
+#' ## H1 and H2 with a subset of CS-items
+#' 
+#' Model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+
+model_H1H2.sub<-"
+#loadings
+VAA_LR=~y22+y23+y26+y27+y9+y19
+VAA_GT=~y4+y5+y1+y21
+CS_LR=~C1_7+C1_8
+CS_GT=~C1_1+C1_4+C1_6+C1_10
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+"
+
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.sub<-cfa(model=model_H1H2.sub,
+              data=dat2011,
+              missing="fiml")
+
+#' 
+#' Problems again
+#' 
+#' Add the preregistered residual correlation.
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+model_H1H2.sub.re<-paste0(model_H1H2.sub,
+                      "y4~~C1_4\n")
+
+#' 
+#' #### Fit the respecified model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.sub.re<-cfa(model=model_H1H2.sub.re,
+              data=dat2011,
+              missing="fiml")
+
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2.sub,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.sub.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is quite poor
+#' 
+#' Hypotheses 1 and 2
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H1H2.sub.re<-standardizedsolution(fit_H1H2.sub.re)
+std.est_H1H2.sub.re[std.est_H1H2.sub.re$op==":=" | 
+               std.est_H1H2.sub.re$op=="~~" & 
+               std.est_H1H2.sub.re$lhs!=std.est_H1H2.sub.re$rhs,]
+
+#' 
+#' H1: There is strong (.741, p < .001) correlation between VAA-LR and CS-LR, and it is notably stronger (difference in correlations .295, p < .001) than the strongest of correlations between different dimensions (.446 between VAA_LR and VAA_GT, p < .001)
+#' 
+#' H2: There is very strong (.987, p < .001) correlation between VAA-GT and CS-GT, and it is notably stronger (difference in correlations .541, p < .001) than the strongest of correlations between different dimensions (.446 between VAA_LR and VAA_GT, p < .001)
+#' 
+#' Seek misspecifications
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis.H1H2<-miPowerFit(fit_H1H2.sub.re,stdLoad=.40,cor=.20)
+mis.H1H2<-mis.H1H2[mis.H1H2$op=="=~" | 
+                     (mis.H1H2$op=="~~" &
+                        mis.H1H2$lhs!=mis.H1H2$rhs),]
+#see summary of the decisions
+table(mis.H1H2$decision.pow)
+
+#there are eight misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis.H1H2[,rounded.vars]<-sapply(mis.H1H2[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis.H1H2 %>%
+  filter(mis.H1H2$decision.pow=="M" | 
+                mis.H1H2$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+  
+
+#' 
+#' In this model as well, similarly to the model with the original set of items, y1 (Finland should continue to financially assist EU countries that are facing economic hardship (r.)) is indicated to crossload on all factor, and it also has a residual correlation with C1_10 (Maahanmuutto on hyvä asia Suomen taloudelle). Add this residual correlation.
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+model_H1H2.sub.exp.re<-paste0(model_H1H2.sub.re,
+                      "y1~~C1_10\n")
+
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.sub.exp.re<-cfa(model=model_H1H2.sub.exp.re,
+              data=dat2011,
+              missing="fiml")
+
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2.sub.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.sub.exp.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is not improved much
+#' 
+#' Hypotheses 1 and 2
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H1H2.sub.exp.re<-standardizedsolution(fit_H1H2.sub.exp.re)
+std.est_H1H2.sub.exp.re[std.est_H1H2.sub.exp.re$op==":=" | 
+               std.est_H1H2.sub.exp.re$op=="~~" & 
+               std.est_H1H2.sub.exp.re$lhs!=std.est_H1H2.sub.exp.re$rhs,]
+
+#' 
+#' Hypothesis inference seems almost identical
+#' 
+#' H1: There is strong (.740, p < .001) correlation between VAA-LR and CS-LR, and it is notably stronger (difference in correlations .273, p < .001) than the strongest of correlations between different dimensions (.456 between VAA_LR and VAA_GT, p < .001)
+#' 
+#' H2: There is very strong (.974, p < .001) correlation between VAA-GT and CS-GT, and it is notably stronger (difference in correlations .507, p < .001) than the strongest of correlations between different dimensions (.456 between VAA_LR and VAA_GT, p < .001)
+#' 
+#' Seek misspecifications
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis.H1H2<-miPowerFit(fit_H1H2.sub.exp.re,stdLoad=.40,cor=.20)
+mis.H1H2<-mis.H1H2[mis.H1H2$op=="=~" | 
+                     (mis.H1H2$op=="~~" &
+                        mis.H1H2$lhs!=mis.H1H2$rhs),]
+#see summary of the decisions
+table(mis.H1H2$decision.pow)
+
+#there are eight misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis.H1H2[,rounded.vars]<-sapply(mis.H1H2[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis.H1H2 %>%
+  filter(mis.H1H2$decision.pow=="M" | 
+                mis.H1H2$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+  
+
+#' 
+#' The cross-loadings with y1 did not go away with the residual correlation. Exclude the item entirely.
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+
+model_H1H2.sub.exp.re.2<-"
+#loadings
+VAA_LR=~y22+y23+y26+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_7+C1_8
+CS_GT=~C1_1+C1_4+C1_6+C1_10
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H1:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H2:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+y4	~~	C1_4
+"
+
+
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H1H2.sub.exp.re.2<-cfa(model=model_H1H2.sub.exp.re.2,
+              data=dat2011,
+              missing="fiml")
+
+
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H1H2.sub.exp.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H1H2.sub.exp.re.2,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Now the fit seems to be adequate (These models are not nested, and can't be compared, therefore)
+#' 
+#' Hypotheses 1 and 2
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H1H2.sub.exp.re.2<-standardizedsolution(fit_H1H2.sub.exp.re.2)
+std.est_H1H2.sub.exp.re.2[std.est_H1H2.sub.exp.re.2$op==":=" | 
+               std.est_H1H2.sub.exp.re.2$op=="~~" & 
+               std.est_H1H2.sub.exp.re.2$lhs!=std.est_H1H2.sub.exp.re.2$rhs,]
+
+#' 
+#' Hypothesis inference seems almost identical
+#' 
+#' H1: There is strong (.741, p < .001) correlation between VAA-LR and CS-LR, and it is notably stronger (difference in correlations .240, p < .001) than the strongest of correlations between different dimensions (.442 between VAA_LR and VAA_GT, p < .001)
+#' 
+#' H2: There is very strong (.988, p < .001) correlation between VAA-GT and CS-GT, and it is notably stronger (difference in correlations .488, p < .001) than the strongest of correlations between different dimensions (.442 between VAA_LR and VAA_GT, p < .001)
+#' 
+#' Print all model parameters
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H1H2.sub.exp.re.2
+
+#' 
+#' \newpage
+#' 
+#' ## H3 and H4
+#' 
+#' Exclude other than members of the eight parties that have multiple members in the parliament
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+dat2011.party<-dat2011 %>%
+  filter(puolue=="KD" |
+           puolue=="KESK" |
+           puolue=="KOK" |
+           puolue=="PS" |
+           puolue=="RKP" |
+           puolue=="SDP" |
+           puolue=="VAS" |
+           puolue=="VIHR")
+
+table(dat2011.party$puolue)
+
+#' 
+#' 
+#' ### Define the model
+#' 
+#' Use the subset of items that were used for H1 and H2
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+
+model_H3H4<-"
+#loadings
+VAA_LR=~y22+y23+y26+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_7+C1_8
+CS_GT=~C1_1+C1_4+C1_6+C1_10
+
+#cross-dimension same-method
+VAA_LR~~c(r.VAA.KD,r.VAA.KESK,r.VAA.KOK,r.VAA.PS,r.VAA.RKP,r.VAA.SDP,r.VAA.VAS,r.VAA.VIHR)*VAA_GT
+CS_LR~~c(r.CS.KD,r.CS.KESK,r.CS.KOK,r.CS.PS,r.CS.RKP,r.CS.SDP,r.CS.VAS,r.CS.VIHR)*CS_GT
+
+#concurrent validity
+VAA_LR~~c(r.LR.KD,r.LR.KESK,r.LR.KOK,r.LR.PS,r.LR.RKP,r.LR.SDP,r.LR.VAS,r.LR.VIHR)*CS_LR
+VAA_GT~~c(r.GT.KD,r.GT.KESK,r.GT.KOK,r.GT.PS,r.GT.RKP,r.GT.SDP,r.GT.VAS,r.GT.VIHR)*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~c(r.d1.KD,r.d1.KESK,r.d1.KOK,r.d1.PS,r.d1.RKP,r.d1.SDP,r.d1.VAS,r.d1.VIHR)*CS_GT
+VAA_GT~~c(r.d2.KD,r.d2.KESK,r.d2.KOK,r.d2.PS,r.d2.RKP,r.d2.SDP,r.d2.VAS,r.d2.VIHR)*CS_LR
+
+#custom parameters
+mean.r.VAA:=mean(r.VAA.KD,r.VAA.KESK,r.VAA.KOK,r.VAA.PS,r.VAA.RKP,r.VAA.SDP,r.VAA.VAS,r.VAA.VIHR)
+mean.r.CS:=mean(r.CS.KD,r.CS.KESK,r.CS.KOK,r.CS.PS,r.CS.RKP,r.CS.SDP,r.CS.VAS,r.CS.VIHR)
+mean.r.LR:=mean(r.LR.KD,r.LR.KESK,r.LR.KOK,r.LR.PS,r.LR.RKP,r.LR.SDP,r.LR.VAS,r.LR.VIHR)
+mean.r.GT:=mean(r.GT.KD,r.GT.KESK,r.GT.KOK,r.GT.PS,r.GT.RKP,r.GT.SDP,r.GT.VAS,r.GT.VIHR)
+mean.r.d1:=mean(r.d1.KD,r.d1.KESK,r.d1.KOK,r.d1.PS,r.d1.RKP,r.d1.SDP,r.d1.VAS,r.d1.VIHR)
+mean.r.d2:=mean(r.d2.KD,r.d2.KESK,r.d2.KOK,r.d2.PS,r.d2.RKP,r.d2.SDP,r.d2.VAS,r.d2.VIHR)
+
+test.H3:=mean.r.LR-max(mean.r.VAA,mean.r.CS,mean.r.d1,mean.r.d2)
+test.H4:=mean.r.GT-max(mean.r.VAA,mean.r.CS,mean.r.d1,mean.r.d2)
+
+
+"
+
+
+
+
+#' 
+#' 
+#' ### Fit the configural model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4<-cfa(model=model_H3H4,
+              data=dat2011.party,
+              group=c("puolue"),
+              group.label=c("KD","KESK","KOK","PS","RKP","SDP","VAS","VIHR"),
+              missing="fiml")
+
+
+#' 
+#' Add the preregistered residual correlation
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+model_H3H4.re<-paste0(model_H3H4,
+                      "y4~~C1_4\n")
+
+#' 
+#' #### Fit the respecified model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re<-cfa(model=model_H3H4.re,
+              data=dat2011.party,
+              group=c("puolue"),
+              group.label=c("KD","KESK","KOK","PS","RKP","SDP","VAS","VIHR"),
+              missing="fiml")
+
+
+
+#' 
+#' The model does not converge.
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+summary(fit_H3H4.re,fit=T,standardized=T)
+
+#' 
+#' 
+#' Try to fit the model separately for each group
+#' 
+#' \newpage
+#' 
+#' #### Model for KD
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.KD<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("KD"),
+                    missing="fiml")
+
+#' 
+#' Model for KD does not converge
+#' 
+## ----eval=FALSE, include=FALSE-------------------------------------------------------------------------------------
+## round(inspect(fit_H3H4.re.KD,"fit")
+##       [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.KD<-standardizedsolution(fit_H3H4.re.KD)
+std.est_H3H4.re.KD[std.est_H3H4.re.KD$op==":=" | 
+               std.est_H3H4.re.KD$op=="~~" & 
+               std.est_H3H4.re.KD$lhs!=std.est_H3H4.re.KD$rhs,]
+
+#' 
+#' 
+#' \newpage
+#' 
+#' #### Model for KESK
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.KESK<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("KESK"),
+                    missing="fiml")
+
+#' 
+#' Model for KESK does converge
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re.KESK,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.KESK<-standardizedsolution(fit_H3H4.re.KESK)
+std.est_H3H4.re.KESK[std.est_H3H4.re.KESK$op==":=" | 
+               std.est_H3H4.re.KESK$op=="~~" & 
+               std.est_H3H4.re.KESK$lhs!=std.est_H3H4.re.KESK$rhs,]
+
+#' 
+#' 
+#' \newpage
+#' 
+#' #### Model for KOK
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.KOK<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("KOK"),
+                    missing="fiml")
+
+#' 
+#' Model for KOK has problems
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re.KOK,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.KOK<-standardizedsolution(fit_H3H4.re.KOK)
+std.est_H3H4.re.KOK[std.est_H3H4.re.KOK$op==":=" | 
+               std.est_H3H4.re.KOK$op=="~~" & 
+               std.est_H3H4.re.KOK$lhs!=std.est_H3H4.re.KOK$rhs,]
+
+#' 
+#' Correlations larger than 1.00
+#' 
+#' \newpage
+#' 
+#' #### Model for PS
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.PS<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("PS"),
+                    missing="fiml")
+
+#' 
+#' Model for PS has problems with negative variances
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re.PS,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor, but not very poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.PS<-standardizedsolution(fit_H3H4.re.PS)
+std.est_H3H4.re.PS[std.est_H3H4.re.PS$op==":=" | 
+               std.est_H3H4.re.PS$op=="~~" & 
+               std.est_H3H4.re.PS$lhs!=std.est_H3H4.re.PS$rhs,]
+
+#' 
+#' \newpage
+#' 
+#' #### Model for RKP
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.RKP<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("RKP"),
+                    missing="fiml")
+
+#' 
+#' Model for RKP converges, but has problem with negative variances
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re.RKP,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.RKP<-standardizedsolution(fit_H3H4.re.RKP)
+std.est_H3H4.re.RKP[std.est_H3H4.re.RKP$op==":=" | 
+               std.est_H3H4.re.RKP$op=="~~" & 
+               std.est_H3H4.re.RKP$lhs!=std.est_H3H4.re.RKP$rhs,]
+
+#' 
+#' 
+#' \newpage
+#' 
+#' #### Model for SDP
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.SDP<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("SDP"),
+                    missing="fiml")
+
+#' 
+#' Model for SDP converges
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re.SDP,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.SDP<-standardizedsolution(fit_H3H4.re.SDP)
+std.est_H3H4.re.SDP[std.est_H3H4.re.SDP$op==":=" | 
+               std.est_H3H4.re.SDP$op=="~~" & 
+               std.est_H3H4.re.SDP$lhs!=std.est_H3H4.re.SDP$rhs,]
+
+#' 
+#' 
+#' \newpage
+#' 
+#' #### Model for VAS
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.VAS<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("VAS"),
+                    missing="fiml")
+
+#' 
+#' Model for VAS has problems
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re.VAS,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.VAS<-standardizedsolution(fit_H3H4.re.VAS)
+std.est_H3H4.re.VAS[std.est_H3H4.re.VAS$op==":=" | 
+               std.est_H3H4.re.VAS$op=="~~" & 
+               std.est_H3H4.re.VAS$lhs!=std.est_H3H4.re.VAS$rhs,]
+
+#' 
+#' Correlations are impossible
+#' 
+#' \newpage
+#' 
+#' #### Model for VIHR
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re.VIHR<-cfa(model=model_H1H2.re,
+                    data=dat2011.party,
+                    group=c("puolue"),
+                    group.label=c("VIHR"),
+                    missing="fiml")
+
+#' 
+#' Model for VIHR does not converge
+#' 
+## ----eval=FALSE, include=FALSE-------------------------------------------------------------------------------------
+## round(inspect(fit_H3H4.re.VIHR,"fit")
+##       [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' Fit is poor
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re.VIHR<-standardizedsolution(fit_H3H4.re.VIHR)
+std.est_H3H4.re.VIHR[std.est_H3H4.re.VIHR$op==":=" | 
+               std.est_H3H4.re.VIHR$op=="~~" & 
+               std.est_H3H4.re.VIHR$lhs!=std.est_H3H4.re.VIHR$rhs,]
+
+#' 
+#' \newpage
+#' 
+#' ### Summary of H3-H4 with MG-CFA approach
+#' 
+#' The configural model did not converge, even after respecification. Single group model also were non-converging or had other type of problems, except for KD and KOK, for which the fit of the model nevertheless was poor, and therefore not interpretable.
+#' 
+#' This most likely is an indication that the sample sizes of the parties are too small for this model with 21 indicators and 4 factors. 
+#' 
+#' The alternative way to test hypotheses 4-6 is presented below. It unconfounds the associations in the model by using party-mean centered observed variables for estimating the similar type of model that was used for H1 and H2, and H5, respectively. Because this approach does not have any grouping structure, it uses the overall sample size for the eight parties, which is `r nrow(dat2011.party)`. It is nevertheless only conducted among the eight focal parties, and other parties are excluded. Because the misspecification in the model with centered variables might be entirely different to raw score variables, the modeling is again started with no residual correlations and they are examined if the fit of the model is inadequate.
+#' 
+#' \newpage
+#' 
+#' ## H3 and H4 with group-mean centered variables and no grouping structure
+#' 
+#' Estimate how much of the variation in each item is between-groups
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+#there was problems running the mult.icc function to the data structure so 
+#data observed data was extracted from one of the previously fitted models
+#to get rid of all labels etc.
+
+num.dat.2011<-data.frame(fit_H1H2@Data@X,dat2011$puolue)
+names(num.dat.2011)<-c(fit_H1H2@Data@ov$name,"puolue")
+num.dat.2011<-num.dat.2011 %>%
+  filter(puolue=="KD" |
+           puolue=="KESK" |
+           puolue=="KOK" |
+           puolue=="PS" |
+           puolue=="RKP" |
+           puolue=="SDP" |
+           puolue=="VAS" |
+           puolue=="VIHR")
+
+
+ICC<-data.frame(multilevel::mult.icc(x=num.dat.2011[,obs_items[2:length(obs_items)]],
+                                     grpid=num.dat.2011$puolue))
+ICC[,2:3]<-round(ICC[,2:3],3)
+ICC
+describe(ICC$ICC1,fast=T)
+
+ICC$label<-get_label(df2011[,as.character(ICC[,1])])
+
+#export to .csv file
+write.csv2(ICC,"ICC_2011.csv")
+
+
+
+
+#' 
+#' ICC gives the proportion (%) of variance that is between the parties. There is quite a lot between-party variance.
+#' 
+#' Center all observed variables
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+ind.items<-obs_items[2:length(obs_items)]
+
+dat2011.gmc<-data.frame(dat2011.party)
+
+na.mean<-function(var){
+  mean(var,na.rm=T)
+}
+
+group.means<-dat2011.gmc %>%
+  group_by(puolue) %>%
+  summarise_at(ind.items,na.mean)
+
+dat2011.gmc<-left_join(x=dat2011.gmc,
+                       y=group.means,
+                       by=c("puolue"),
+                       suffix=c("",".pm"))
+
+ind.items %in% names(dat2011.gmc)
+paste0(ind.items,".pm") %in% names(dat2011.gmc)
+
+for(i in 1:length(ind.items)){
+  dat2011.gmc[,which(names(dat2011.gmc)==ind.items[i])]<-
+    dat2011.gmc[,which(names(dat2011.gmc)==ind.items[i])]-
+    dat2011.gmc[,which(names(dat2011.gmc)==paste0(ind.items[i],".pm"))]
+}
+
+
+psych::describe(dat2011.gmc[,ind.items],fast=T)
+
+#' 
+#' 
+#' ### Define the model
+#' 
+#' Use the subset of items used for H1 and H2
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+
+model_H3H4<-"
+#loadings
+VAA_LR=~y22+y23+y26+y27+y9+y19
+VAA_GT=~y4+y5+y21
+CS_LR=~C1_7+C1_8
+CS_GT=~C1_1+C1_4+C1_6+C1_10
+
+#latent correlations
+
+#cross-dimension same-method
+VAA_LR~~r.VAA*VAA_GT
+CS_LR~~r.CS*CS_GT
+
+#concurrent validity
+VAA_LR~~r.LR*CS_LR
+VAA_GT~~r.GT*CS_GT
+
+#cross-dimension cross-method correlations
+VAA_LR~~r.d1*CS_GT
+VAA_GT~~r.d2*CS_LR
+
+#custom parameters
+test.H3:=r.LR-max(r.VAA,r.CS,r.d1,r.d2)
+test.H4:=r.GT-max(r.VAA,r.CS,r.d1,r.d2)
+
+"
+
+
+
+#' 
+#' 
+#' 
+#' ### Fit the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4<-cfa(model=model_H3H4,
+              data=dat2011.gmc,
+              missing="fiml")
+
+
+#' 
+#' Problems with the covariance structure, add the preregistered residual correlation.
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+model_H3H4.re<-paste0(model_H3H4,
+                      "y4~~C1_4\n")
+
+#' 
+#' #### Fit the respecified model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.re<-cfa(model=model_H3H4.re,
+              data=dat2011.gmc,
+              missing="fiml")
+
+
+#' 
+#' Problem was solved with the residual correlation
+#' 
+#' 
+#' Inspect fit of the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' The fit of the model is adequate.
+#' 
+#' Hypotheses 3 and 4
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.re<-standardizedsolution(fit_H3H4.re)
+std.est_H3H4.re[std.est_H3H4.re$op==":=" | 
+               std.est_H3H4.re$op=="~~" & 
+               std.est_H3H4.re$lhs!=std.est_H3H4.re$rhs,]
+
+#' 
+#' H3: There is a moderately strong (.424, p < .001) correlation between VAA-LR and CS-LR, and it is not stronger (difference in correlations -.015, p = .897) than the strongest of correlations between different dimensions (.439 between VAA_LR and CS_GT, p < .001)
+#' 
+#' H4: There is a strong (.863, p < .001) correlation between VAA-GT and CS-GT, and it is notably stronger (difference in correlations .425, p < .001) than the strongest of correlations between different dimensions (.439 between VAA_LR and CS_GT, p < .001)
+#' 
+#' 
+#' #### Exploratory for H3 and H4: Seek misspecification to improve the overall model fit
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+mis.H3H4<-miPowerFit(fit_H3H4.re,stdLoad=.40,cor=.20)
+mis.H3H4<-mis.H3H4[mis.H3H4$op=="=~" |  mis.H3H4$op=="~~",]
+#see summary of the decisions
+table(mis.H3H4$decision.pow)
+#there are 6 misspecifications
+
+rounded.vars<-c("mi","epc","target.epc",
+                "std.epc","se.epc")
+
+num.round<-function(var){
+  var<-as.numeric(var)
+  var<-round(var,2)
+  return(var)
+}
+
+mis.H3H4[,rounded.vars]<-sapply(mis.H3H4[,rounded.vars],num.round)
+
+printed.vars<-c("lhs","op","rhs","mi","epc","target.epc",
+                "std.epc","std.target.epc","significant.mi",
+                "high.power","decision.pow","se.epc")
+
+#print the output
+
+mis.H3H4 %>%
+  filter(mis.H3H4$decision.pow=="M" | 
+                mis.H3H4$decision.pow=="EPC:M") %>%
+  dplyr::select(all_of(printed.vars)) 
+
+  
+
+#' 
+#' All the proposed loadings would be cross-loadings across methods (from VAA to CS or vice versa), and therefore not applicable for the present approach. Also, the expected parameter changes are indicative that most of these respecification would be Heywood -cases (standardized loadings that would be larger than 1 in absolute magnitude).
+#' 
+#' There were two misspecified residual correlations: y26. "Taxation of high earners should be increased in the next electoral cycle (r.)" and C1_8. "Tuloja ja vaurautta pitäisi uudelleenjakaa tavallisten ihmisten suuntaan" and between C1.1 "Maahanmuuttajien pitäisi sopeutua suomalaisiin tapoihin" and "Lakia rikkovia ihmisiä pitäisi rangaista kovemmin"
+#' 
+#' Add these residual correlations to the model.
+#' 
+#' 
+#' ##### Exploratory respecification
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+model_H3H4.exp.re<-paste0(model_H3H4.re,
+                      "y26~~C1_8\n",
+                      "C1_1~~C1_6\n")
+
+
+#' 
+#' 
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+fit_H3H4.exp.re<-cfa(model=model_H3H4.exp.re,
+              data=dat2011.gmc,
+              missing="fiml")
+
+#' 
+#' Inspect fit of the model
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+round(inspect(fit_H3H4.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+round(inspect(fit_H3H4.exp.re,"fit")
+      [c("npar","df","chisq","pvalue","cfi","tli","rmsea","srmr")],3)
+
+#' 
+#' The fit of the model is improved 
+#' 
+#' Retest Hypotheses 4 and 5
+#' 
+#' Print standardized estimates to test the difference between correlations
+#' 
+## ------------------------------------------------------------------------------------------------------------------
+std.est_H3H4.exp<-standardizedsolution(fit_H3H4.exp.re)
+std.est_H3H4.exp[std.est_H3H4.exp$op==":=" | 
+               std.est_H3H4.exp$op=="~~" & 
+               std.est_H3H4.exp$lhs!=std.est_H3H4.exp$rhs,]
+
+#' 
+#' The results are virtually identical to those without the additional residual correlations.
+#' 
+#' H3: There is a moderately strong (.379, p < .001) correlation between VAA-LR and CS-LR, and it is not stronger (difference in correlations -.065, p = .575) than the strongest of correlations between different dimensions (.444 between VAA_LR and CS_GT, p < .001)
+#' 
+#' H4: There is a very strong (.963, p < .001) correlation between VAA-GT and CS-GT, and it is notably stronger (difference in correlations .519, p < .001) than the strongest of correlations between different dimensions (.444 between VAA_LR and CS_GT, p < .001)
+#' 
+#' ### Examine how self-placement on 
